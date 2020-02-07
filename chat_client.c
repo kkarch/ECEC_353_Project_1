@@ -6,8 +6,8 @@
  * Date created: January 28, 2020
  * Date modified:
  *
- * Student/team name: FIXME
- * Date created: FIXME 
+ * Student/team name: Madeline Cook, Kevin Karch
+ * Date created: 2/7/2020 
  *
 */
 
@@ -36,6 +36,13 @@ int
 main (int argc, char **argv)
 {
     char user_name[USER_NAME_LEN];
+    char private_name[USER_NAME_LEN];//recipient of private messages //we could add this to the back of the private message and then handle it on the server side
+    //from send_msg.c
+    int flags;
+    mqd_t mqd;
+    flags = O_WRONLY;
+    flags |= O_NONBLOCK;
+    unsigned int priority; //can be used to indicate if the message is for everyone or for a private user
 
     if (argc != 2) {
         printf ("Usage: %s user-name\n", argv[0]);
@@ -55,12 +62,33 @@ main (int argc, char **argv)
 
         switch (option) {
             case 'B':
-               /* FIXME: Send message to server to be broadcast */ 
+               /* FIXME: Send message to server to be broadcast */
+               priority=10; 
+               /* Open the specified MQ for O_WRONLY operation */
+                mqd = mq_open ("/mads_and_kev_mq", flags);
+                if (mqd == (mqd_t) -1) {
+                    perror ("mq_open");
+                    exit (EXIT_FAILURE);
+                }
+                if (mq_send (mqd, argv[2], strlen (argv[2]), priority) == -1) { //i think the message is argv 2 bc argv 1 is the user name
+                    perror ("mq_send");
+                    exit (EXIT_FAILURE);
+                }
                 break;
 
             case 'P':
                 /* FIXME: Get name of private user and send the private 
                  * message to server to be sent to private user */
+                 priority=10;
+                mqd = mq_open ("/mads_and_kev_mq", flags);
+                if (mqd == (mqd_t) -1) {
+                    perror ("mq_open");
+                    exit (EXIT_FAILURE);
+                }
+                if (mq_send (mqd, argv[2], strlen (argv[2]), priority) == -1) { //i think the message is argv 2 bc argv 1 is the user name
+                    perror ("mq_send");
+                    exit (EXIT_FAILURE);
+                }
                 break;
 
             case 'E':
