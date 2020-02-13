@@ -32,20 +32,25 @@ print_main_menu (void)
     return;
 }
 
+
 int 
 main (int argc, char **argv)
 {
     char user_name[USER_NAME_LEN];
-    char private_name[USER_NAME_LEN];//recipient of private messages //we could add this to the back of the private message and then handle it on the server side
+    char private_user[USER_NAME_LEN];
     //from send_msg.c
     int flags;
     mqd_t mqd;
     flags = O_WRONLY;
     flags |= O_NONBLOCK;
-    unsigned int priority; //can be used to indicate if the message is for everyone or for a private user
+    unsigned int priority;
+    
+    char message[2048]; //this is the message size specified in the server
+    char pm_message[2048+USER_NAME_LEN];
+    
 
     if (argc != 2) {
-        printf ("Usage: %s user-name\n", argv[0]);
+        printf ("Usage: %s user-name message\n", argv[0]);
         exit (EXIT_FAILURE);
     }
 
@@ -62,33 +67,58 @@ main (int argc, char **argv)
 
         switch (option) {
             case 'B':
-               /* FIXME: Send message to server to be broadcast */
-               priority=10; 
-               /* Open the specified MQ for O_WRONLY operation */
-                mqd = mq_open ("/mads_and_kev_mq", flags);
-                if (mqd == (mqd_t) -1) {
-                    perror ("mq_open");
-                    exit (EXIT_FAILURE);
-                }
-                if (mq_send (mqd, argv[2], strlen (argv[2]), priority) == -1) { //i think the message is argv 2 bc argv 1 is the user name
-                    perror ("mq_send");
-                    exit (EXIT_FAILURE);
-                }
+                  printf ("Option B.\n");
+                  printf("\nEnter Message: ");
+                  dummy=getchar(); //clears the input buffer
+                  fgets (message, sizeof(message), stdin);
+                  //printf("%s\n", message);
+                  
+                  /* FIXME: Send message to server to be broadcast */
+                  priority=0; 
+                  /* Open the specified MQ for O_WRONLY operation */
+                  mqd = mq_open ("/mads_and_kev_mq", flags);
+                  if (mqd == (mqd_t) -1) {
+                  perror ("mq_open");
+                  exit (EXIT_FAILURE);
+                              }
+                  if (mq_send (mqd, message, strlen (message), priority) == -1) {
+                  perror ("mq_send");
+                  exit (EXIT_FAILURE);
+                              }
+                  printf("Broadcast saying '%s' sent!\n", message);
+
+
                 break;
 
             case 'P':
-                /* FIXME: Get name of private user and send the private 
+                  printf ("Option P\n");
+                  
+                  printf("\nEnter Message: ");
+                  dummy=getchar(); //clears the input buffer
+                  fgets (message, sizeof(message), stdin);
+                  //printf("%s\n", message);
+                  strcat(pm_message,message);
+                  
+                  printf("\nEnter Recipient User Name: ");
+                  //dummy=getchar(); //clears the input buffer
+                  fgets (private_user, sizeof(private_user), stdin);
+                  strcat(pm_message,private_user);//this will be sent to the server and it will know if the priority is not 0 then the priority is the length of the message before the user name
+                  /* FIXME: Get name of private user and send the private 
                  * message to server to be sent to private user */
-                 priority=10;
-                mqd = mq_open ("/mads_and_kev_mq", flags);
-                if (mqd == (mqd_t) -1) {
-                    perror ("mq_open");
-                    exit (EXIT_FAILURE);
-                }
-                if (mq_send (mqd, argv[2], strlen (argv[2]), priority) == -1) { //i think the message is argv 2 bc argv 1 is the user name
-                    perror ("mq_send");
-                    exit (EXIT_FAILURE);
-                }
+                  printf("%s", pm_message);
+                  priority=strlen(message); 
+                  /* Open the specified MQ for O_WRONLY operation */
+                  mqd = mq_open ("/mads_and_kev_mq", flags);
+                  if (mqd == (mqd_t) -1) {
+                  perror ("mq_open");
+                  exit (EXIT_FAILURE);
+                              }
+                  if (mq_send (mqd, pm_message, strlen (pm_message), priority) == -1) {
+                  perror ("mq_send");
+                  exit (EXIT_FAILURE);
+                              }
+                  printf("Private message saying %s sent to %s!\n", message, private_user);
+
                 break;
 
             case 'E':

@@ -48,6 +48,9 @@ quit_server ()
 int 
 main (int argc, char **argv) 
 {
+    char private_user[USER_NAME_LEN];
+    char message[2048]; //this is the message size specified in the server
+    char pm_message[2048+USER_NAME_LEN];
     //establish signal handler
     signal (SIGINT, custom_signal_handler);
     signal (SIGQUIT, custom_signal_handler);
@@ -70,6 +73,9 @@ main (int argc, char **argv)
     mode_t perms;
     mqd_t mqd;
     struct mq_attr attr, *attrp;
+    unsigned int priority;
+    void *buffer;
+    ssize_t nr;
 
     /* Set the default message queue attributes. */
     attrp = NULL;
@@ -91,6 +97,34 @@ main (int argc, char **argv)
     while (1) {
        /* FIXME: Server code here */
        //recieve message code
+           /* Get the attributes of the MQ */
+        if (mq_getattr (mqd, &attr) == -1) {
+            perror ("mq_getattr");
+            exit (EXIT_FAILURE);
+        }
+    
+        /* Allocate local buffer to store the received message from the MQ */
+        buffer = malloc (sizeof(attr.mq_msgsize));
+        if (buffer == NULL) {
+            perror ("malloc");
+            exit (EXIT_FAILURE);
+        }
+    
+        nr = mq_receive (mqd, buffer, attr.mq_msgsize, &priority);
+        if (nr == -1) {
+            perror ("mq_receive");
+            exit (EXIT_FAILURE);
+        }
+    
+        printf ("Read %ld bytes; priority = %u \n", (long) nr, priority);
+        if (priority!=0){
+         //split up message and username, priority is byte length of the message
+        
+        }
+        if (write (STDOUT_FILENO, buffer, nr) == -1) {
+            perror ("write");
+            exit (EXIT_FAILURE);
+        }
        //client tracking
        //notifications & more
        printf("Server running... \n");
