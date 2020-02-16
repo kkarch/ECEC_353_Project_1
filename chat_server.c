@@ -11,6 +11,7 @@
  */
 #define _POSIX_C_SOURCE 1
 //#define _POSIX_C_SOURCE 2
+#define USER_LIMIT 2
 
 #include <mqueue.h>
 #include <sys/stat.h>
@@ -20,123 +21,159 @@
 #include <stdio.h>
 #include <errno.h>
 #include "msg_structure.h"
-
+#include <string.h>
 #include <signal.h>
 #include <limits.h>
 #include <setjmp.h>
 
 #define FALSE 0
 #define TRUE !FALSE
-#define CTRLC  1337
+#define CTRLC 1337
 
-static void custom_signal_handler (int); 
+static void custom_signal_handler(int);
 static sigjmp_buf env;
 
 /* function called by signal handler */
-void 
-quit_server ()
+void quit_server()
 {
     printf("\n CTRL+C Received. Shutting down message queue. \n");
     /* mq_unlink(mq_pathname) */
-    if (mq_unlink ("/mads_and_kev_mq") == -1) {
-        perror ("Client: mq_unlink");
-        exit (1);
+    if (mq_unlink("/MCKK_Server") == -1)
+    {
+        perror("Client: mq_unlink");
+        exit(1);
     }
 }
 
-
-int 
-main (int argc, char **argv) 
+int main(int argc, char **argv)
 {
-    char private_user[USER_NAME_LEN];
-    char message[2048]; //this is the message size specified in the server
-    char pm_message[2048+USER_NAME_LEN];
+    //char private_user[USER_NAME_LEN];
+    //char message[MESSAGE_LEN]; //this is the message size specified in the server
+    //char pm_message[MESSAGE_LEN];
+
     //establish signal handler
-    signal (SIGINT, custom_signal_handler);
-    signal (SIGQUIT, custom_signal_handler);
-
-
-    int ret;
-    ret = sigsetjmp (env, TRUE);
-    switch (ret) {
-        case 0:
-            /* Returned from explicit sigsetjmp call. */
-            break;
-
-        case CTRLC:
-            quit_server();
-            exit (EXIT_SUCCESS);
-    }
+    signal(SIGINT, custom_signal_handler);
+    signal(SIGQUIT, custom_signal_handler);
 
     //create message queue one time
     int flags;
     mode_t perms;
     mqd_t mqd;
     struct mq_attr attr, *attrp;
-    unsigned int priority;
-    void *buffer;
+    //unsigned int priority;
+    //void *buffer;
     ssize_t nr;
+    struct client_msg msg;
 
     /* Set the default message queue attributes. */
     attrp = NULL;
-    attr.mq_maxmsg = 10;    /* Maximum number of messages on queue */
+    attr.mq_maxmsg = 10; /* Maximum number of messages on queue */
     attrp = &attr;
-    attr.mq_msgsize = 2048; /* Maximum message size in bytes */
-    attrp = &attr;
-    flags = O_RDWR;         /* Create or open the queue for reading and writing */
+    attr.mq_msgsize = sizeof(msg); /* Maximum message size in bytes */
+    flags = O_RDWR;                /* Create or open the queue for reading and writing */
     flags |= O_CREAT;
 
-    perms = S_IRUSR | S_IWUSR;  /* rw------- permissions on the queue */
+    perms = S_IRUSR | S_IWUSR; /* rw------- permissions on the queue */
 
-    mqd = mq_open ("/mads_and_kev_mq", flags, perms, attrp);
-    if (mqd == (mqd_t)-1) {
-        perror ("mq_open");
-        exit (EXIT_FAILURE);
+    int ret;
+    ret = sigsetjmp(env, TRUE);
+    switch (ret)
+    {
+    case 0:
+        /* Returned from explicit sigsetjmp call. */
+        break;
+
+    case CTRLC:
+        quit_server();
+        exit(EXIT_SUCCESS);
     }
 
-    while (1) {
-       /* FIXME: Server code here */
-       //recieve message code
-           /* Get the attributes of the MQ */
-        if (mq_getattr (mqd, &attr) == -1) {
-            perror ("mq_getattr");
-            exit (EXIT_FAILURE);
-        }
-    
-        /* Allocate local buffer to store the received message from the MQ */
-        buffer = malloc (sizeof(attr.mq_msgsize));
-        if (buffer == NULL) {
-            perror ("malloc");
-            exit (EXIT_FAILURE);
-        }
-    
-        nr = mq_receive (mqd, buffer, attr.mq_msgsize, &priority);
-        if (nr == -1) {
-            perror ("mq_receive");
-            exit (EXIT_FAILURE);
-        }
-    
-        printf ("Read %ld bytes; priority = %u \n", (long) nr, priority);
-        if (priority!=0){
-         //split up message and username, priority is byte length of the message
-        
-        }
-        if (write (STDOUT_FILENO, buffer, nr) == -1) {
-            perror ("write");
-            exit (EXIT_FAILURE);
-        }
-       //client tracking
-       //notifications & more
-       printf("Server running... \n");
-       sleep(3);
+    mqd = mq_open("/MCKK_Server", flags, perms, attrp);
+    if (mqd == (mqd_t)-1)
+    {
+        perror("mq_open");
+        exit(EXIT_FAILURE);
     }
-    exit (EXIT_SUCCESS);
+
+    char users[USER_LIMIT][USER_NAME_LEN];
+    int count,i = 0;
+    while (1)
+    {
+        nr = mq_receive(mqd, (char *)&msg, sizeof(msg) + 1, 0);
+        if (nr == -1)
+        {
+            perror("mq_receive");
+            exit(EXIT_FAILURE);
+        }
+        switch (msg.control)
+        {
+        case 0:
+            /* Check-in Code */
+            if (count < USER_LIMIT){
+                strcpy(users[count], msg.user_name);
+                count++;
+            }
+            else{
+                printf("Checking for Space\n");
+                for(i=0;i<=USER_LIMIT;i++){
+                    if(!strcmp(users[i],"Empty")){
+                        strcpy(users[i],msg.user_name);
+                        break;
+                    }
+                    else if (i == USER_LIMIT)
+                    {
+                        printf("!!!Server Full!!!\n");
+                        printf("%d\n",msg.client_pid);
+                        kill(-9, msg.client_pid);
+                    }
+                }
+            }
+            break;
+
+        case 1:
+            if (msg.broadcast == 1){
+                printf("\nUser %s would like to broadcast\n",msg.user_name);
+            }
+
+            if(msg.broadcast == 0){
+                printf("\nUser %s would like to talk to %s\n",msg.user_name,msg.priv_user_name);
+            }
+            break;
+
+        case 2:
+            /* Exiting Code */
+            printf("User: %s has left the chat\n",msg.user_name);
+            for(i=0;i<USER_LIMIT;i++){
+                if(!strcmp(users[i],msg.user_name)){
+                    strcpy(users[i],"Empty");
+                    break;
+                }                
+            }
+            break;
+        case 3:
+            /* Hidden Testing Code */
+            for(int j=0; j<count; j++){
+                if (strcmp(users[j],"")){
+                    printf("User%d: %s\n",j,users[j]);
+                }
+            }
+            break;
+        default:
+            break;
+        }
+
+        //printf("%s\n",msg.user_name);
+        //printf
+        //printf("Server running... \n");
+        //sleep(3);
+    }
+    exit(EXIT_SUCCESS);
 }
 
 static void
-custom_signal_handler (int signalNumber)
+custom_signal_handler(int signalNumber)
 {
-    signal (SIGINT, custom_signal_handler);
-    signal (SIGQUIT, custom_signal_handler);
-    siglongjmp(env,CTRLC);
+    signal(SIGINT, custom_signal_handler);
+    signal(SIGQUIT, custom_signal_handler);
+    siglongjmp(env, CTRLC);
 }
