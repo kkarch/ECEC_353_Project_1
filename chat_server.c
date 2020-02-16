@@ -12,6 +12,8 @@
 #define _POSIX_C_SOURCE 1
 //#define _POSIX_C_SOURCE 2
 #define USER_LIMIT 2
+#define SERVER_WKK "/MCKK_Server"
+#define SERVER_PREFIX "/MCKK_%s"
 
 #include <mqueue.h>
 #include <sys/stat.h>
@@ -25,6 +27,7 @@
 #include <signal.h>
 #include <limits.h>
 #include <setjmp.h>
+#include <pthread.h>
 
 #define FALSE 0
 #define TRUE !FALSE
@@ -32,13 +35,14 @@
 
 static void custom_signal_handler(int);
 static sigjmp_buf env;
+static char client_name[USER_NAME_LEN];
 
 /* function called by signal handler */
 void quit_server()
 {
     printf("\n CTRL+C Received. Shutting down message queue. \n");
     /* mq_unlink(mq_pathname) */
-    if (mq_unlink("/MCKK_Server") == -1)
+    if (mq_unlink(SERVER_WKK) == -1)
     {
         perror("Client: mq_unlink");
         exit(1);
@@ -47,31 +51,33 @@ void quit_server()
 
 int main(int argc, char **argv)
 {
-    //char private_user[USER_NAME_LEN];
-    //char message[MESSAGE_LEN]; //this is the message size specified in the server
-    //char pm_message[MESSAGE_LEN];
-
-    //establish signal handler
     signal(SIGINT, custom_signal_handler);
     signal(SIGQUIT, custom_signal_handler);
 
-    //create message queue one time
+
+    struct client_msg msg;
+    struct server_msg smsg;
+
+
+    /* Server MQ */
     int flags;
     mode_t perms;
     mqd_t mqd;
     struct mq_attr attr, *attrp;
-    //unsigned int priority;
-    //void *buffer;
     ssize_t nr;
-    struct client_msg msg;
-
-    /* Set the default message queue attributes. */
     attrp = NULL;
     attr.mq_maxmsg = 10; /* Maximum number of messages on queue */
     attrp = &attr;
     attr.mq_msgsize = sizeof(msg); /* Maximum message size in bytes */
     flags = O_RDWR;                /* Create or open the queue for reading and writing */
     flags |= O_CREAT;
+
+    /* Client MQ */
+    int cflags;
+    mqd_t cmqd;
+    cflags = O_WRONLY;
+    cflags |= O_NONBLOCK;
+    //unsigned int priority;
 
     perms = S_IRUSR | S_IWUSR; /* rw------- permissions on the queue */
 
@@ -88,7 +94,7 @@ int main(int argc, char **argv)
         exit(EXIT_SUCCESS);
     }
 
-    mqd = mq_open("/MCKK_Server", flags, perms, attrp);
+    mqd = mq_open(SERVER_WKK, flags, perms, attrp);
     if (mqd == (mqd_t)-1)
     {
         perror("mq_open");
@@ -96,7 +102,7 @@ int main(int argc, char **argv)
     }
 
     char users[USER_LIMIT][USER_NAME_LEN];
-    int count,i = 0;
+    int count, i, found_match = 0;
     while (1)
     {
         nr = mq_receive(mqd, (char *)&msg, sizeof(msg) + 1, 0);
@@ -109,52 +115,125 @@ int main(int argc, char **argv)
         {
         case 0:
             /* Check-in Code */
-            if (count < USER_LIMIT){
+            if (count < USER_LIMIT)
+            {
                 strcpy(users[count], msg.user_name);
                 count++;
             }
-            else{
+            else
+            {
                 printf("Checking for Space\n");
-                for(i=0;i<=USER_LIMIT;i++){
-                    if(!strcmp(users[i],"Empty")){
-                        strcpy(users[i],msg.user_name);
+                for (i = 0; i <= USER_LIMIT; i++)
+                {
+                    if (!strcmp(users[i], "Empty"))
+                    {
+                        strcpy(users[i], msg.user_name);
                         break;
                     }
                     else if (i == USER_LIMIT)
                     {
                         printf("!!!Server Full!!!\n");
-                        printf("%d\n",msg.client_pid);
-                        kill(-9, msg.client_pid);
+                        printf("%d\n", msg.client_pid);
+                        kill(msg.client_pid, SIGINT);
                     }
                 }
             }
-            break;
 
         case 1:
-            if (msg.broadcast == 1){
-                printf("\nUser %s would like to broadcast\n",msg.user_name);
-            }
 
-            if(msg.broadcast == 0){
-                printf("\nUser %s would like to talk to %s\n",msg.user_name,msg.priv_user_name);
+            if (msg.broadcast == 1)
+            {
+                printf("\nUser %s would like to broadcast\n", msg.user_name);
+                strcpy(smsg.msg, msg.msg);
+                strcpy(smsg.sender_name, msg.user_name);
+                for (i = 0; i < count; i++)
+                {
+                    if (strcmp(users[i], "Empty"))
+                    {
+                        printf("\nOpening %s\n", users[i]);
+                        cmqd = mq_open(users[i], cflags);
+                        if (cmqd == (mqd_t)-1)
+                        {
+                            perror("mq_open");
+                            exit(EXIT_FAILURE);
+                        }
+                        printf("Sending %s to %s\n", smsg.msg, users[i]);
+                        if (mq_send(cmqd, (char *)&smsg, sizeof(smsg), 0) == -1)
+                        {
+                            perror("mq_send");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                }
+            }
+            else if (msg.broadcast == 0)
+            {
+                found_match = 0;
+                snprintf(client_name, MESSAGE_LEN, SERVER_PREFIX, (char *)msg.priv_user_name);
+                printf("\nUser %s would like to talk to %s\n", msg.user_name, client_name);
+                strcpy(smsg.msg, msg.msg);
+                strcpy(smsg.sender_name, msg.user_name);
+                for (i = 0; i < count; i++)
+                {
+                    //printf("Comparing %s:%s\n",users[i],client_name);
+                    if (strcmp(users[i], client_name) == 0)
+                    {
+                        printf("Opening %s\n", client_name);
+                        cmqd = mq_open(client_name, cflags);
+                        if (cmqd == (mqd_t)-1)
+                        {
+                            perror("mq_open");
+                            exit(EXIT_FAILURE);
+                        }
+                        printf("Sending %s to %s\n", smsg.msg, client_name);
+                        if (mq_send(cmqd, (char *)&smsg, sizeof(smsg), 0) == -1)
+                        {
+                            perror("mq_send");
+                            exit(EXIT_FAILURE);
+                        }
+                        found_match = 1;
+                        break;
+                    }
+                }
+                if (!found_match)
+                {
+                    cmqd = mq_open(msg.user_name, cflags);
+                    if (cmqd == (mqd_t)-1)
+                    {
+                        perror("mq_open");
+                        exit(EXIT_FAILURE);
+                    }
+                    strcpy(smsg.msg, "Error: No User With that ID");
+                    strcpy(smsg.sender_name, "Server");
+                    if (mq_send(cmqd, (char *)&smsg, sizeof(smsg), 0) == -1)
+                    {
+                        perror("mq_send");
+                        exit(EXIT_FAILURE);
+                    }
+                    printf("User %s not found\n", client_name);
+                }
             }
             break;
 
         case 2:
             /* Exiting Code */
-            printf("User: %s has left the chat\n",msg.user_name);
-            for(i=0;i<USER_LIMIT;i++){
-                if(!strcmp(users[i],msg.user_name)){
-                    strcpy(users[i],"Empty");
+            printf("User: %s has left the chat\n", msg.user_name);
+            for (i = 0; i < USER_LIMIT; i++)
+            {
+                if (!strcmp(users[i], msg.user_name))
+                {
+                    strcpy(users[i], "Empty");
                     break;
-                }                
+                }
             }
             break;
         case 3:
             /* Hidden Testing Code */
-            for(int j=0; j<count; j++){
-                if (strcmp(users[j],"")){
-                    printf("User%d: %s\n",j,users[j]);
+            for (int j = 0; j < count; j++)
+            {
+                if (strcmp(users[j], ""))
+                {
+                    printf("User%d: %s\n", j, users[j]);
                 }
             }
             break;
