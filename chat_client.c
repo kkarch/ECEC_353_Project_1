@@ -239,7 +239,7 @@ int main(int argc, char **argv)
             fgets(message, sizeof(message), stdin);
             strcpy(msg.msg, message);
 
-            printf("\nEnter Recipient User Name %s",SERVER_PREFIX);
+            printf("\nEnter Recipient User Name %s_",SERVER_WKK);
 
             fgets(private_user, sizeof(private_user), stdin);   /* Get the private username and trim \n */
             if(private_user[strlen(private_user)-1] == '\n'){
