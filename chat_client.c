@@ -12,6 +12,8 @@
 */
 
 #define _POSIX_C_SOURCE 2 // For getopt()
+#define SERVER_WKK "/MCKK_Server"
+#define SERVER_PREFIX "/MCKK_%s"
 
 #include <mqueue.h>
 #include <sys/stat.h>
@@ -29,6 +31,7 @@ pid_t getpid(void);
 
 static void setup_notification (mqd_t *mqdp);
 
+/* Function that executes as part of Notification: Modify Notify behavior here*/
 static void 
 thread_func (union sigval sv)
 {
@@ -65,6 +68,7 @@ thread_func (union sigval sv)
     return;
 }
 
+/* Setup Notification: Leave alone */
 static void 
 setup_notification (mqd_t *mqdp)
 {
@@ -83,6 +87,7 @@ setup_notification (mqd_t *mqdp)
     return;
 }
 
+/* Print the options menu to the user */
 void print_main_menu(void)
 {
     printf("\n'B'roadcast message\n");
@@ -91,6 +96,7 @@ void print_main_menu(void)
     return;
 }
 
+/* Safely shut down the client */
 void quit_client(const char* client)
 {
     printf("\nConnection Error: Shutting down message queue. \n");
@@ -102,11 +108,14 @@ void quit_client(const char* client)
     }
 }
 
+
 int main(int argc, char **argv)
 {
+    /* Init Message Structures */
     struct client_msg msg;
     struct server_msg smsg;
 
+    /* Variable Init */
     char user_name[USER_NAME_LEN];
     char private_user[USER_NAME_LEN];
     char message[MESSAGE_LEN]; //this is the message size specified in the server
@@ -146,10 +155,11 @@ int main(int argc, char **argv)
 
     /* Connect to server */
     printf("User %s connecting to server\n", user_name);
+    printf("Warning: If client is terminated, Server is either offline or full. Please try again later.\n");
 
 
-
-    snprintf (client_name, MESSAGE_LEN, "/MCKK_%s", (char*) user_name);
+    /* Create Client WKK and Setup the notification */
+    snprintf (client_name, MESSAGE_LEN, SERVER_PREFIX, (char*) user_name); // Build Standard Client Name
     cmqd = mq_open(client_name, cflags, perms, &attr);
     if (cmqd == (mqd_t)-1)
     {
@@ -158,7 +168,8 @@ int main(int argc, char **argv)
     }
     setup_notification(&cmqd);
 
-    mqd = mq_open("/MCKK_Server", flags);
+    /* Open up server MQ and apply for server space */
+    mqd = mq_open(SERVER_WKK, flags);
     if (mqd == (mqd_t)-1)
     {
         perror("mq_open");
@@ -167,9 +178,9 @@ int main(int argc, char **argv)
     }
 
     /* Init Structure */
-    msg.broadcast = 3;
+    msg.broadcast = 3; // No Message control
     msg.client_pid = getpid();
-    msg.control = 0;
+    msg.control = 0; // Apply for server space
     strcpy(msg.msg, "Empty");
     strcpy(msg.priv_user_name, "None");
     strcpy(msg.user_name, client_name);
@@ -181,6 +192,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    /* !!!! IF SERVER IS FULL, YOU WILL DIE HERE !!! */
 
 
     /* Operational menu for client */
@@ -190,12 +202,9 @@ int main(int argc, char **argv)
         print_main_menu();
         option = getchar();
 
-        //mq_receive(cmqd, (char *)&smsg, sizeof(smsg) + 1, 0);
-        //if(!strcmp(smsg.msg,"Hello")){printf("%s\n",smsg.msg);}
-
         switch (option)
         {
-        case 'B':
+        case 'B': //Broadcast
             printf("Option B.\n");
             printf("\nEnter Message: ");
             dummy = getchar(); //clears the input buffer
@@ -218,7 +227,7 @@ int main(int argc, char **argv)
 
             break;
 
-        case 'P':
+        case 'P': // Private Message
             msg.control = 1; // Normal Op
             priority = 0;
             msg.broadcast = 0;
@@ -230,9 +239,9 @@ int main(int argc, char **argv)
             fgets(message, sizeof(message), stdin);
             strcpy(msg.msg, message);
 
-            printf("\nEnter Recipient User Name: ");
+            printf("\nEnter Recipient User Name %s",SERVER_PREFIX);
 
-            fgets(private_user, sizeof(private_user), stdin);
+            fgets(private_user, sizeof(private_user), stdin);   /* Get the private username and trim \n */
             if(private_user[strlen(private_user)-1] == '\n'){
                 private_user[strlen(private_user)-1] = '\0';
             }
@@ -240,7 +249,7 @@ int main(int argc, char **argv)
 
 
 
-            if (mq_send(mqd, (char *)&msg, sizeof(msg), priority) == -1)
+            if (mq_send(mqd, (char *)&msg, sizeof(msg), priority) == -1) // Send the Private message structure
             {
                 perror("mq_send");
                 exit(EXIT_FAILURE);
@@ -249,9 +258,9 @@ int main(int argc, char **argv)
 
             break;
 
-        case 'E':
+        case 'E': // Break up with the server :'(  
             printf("Chat client exiting\n");
-            /* FIXME: Send message to server that we are exiting */
+            /* Send message to server that we are exiting */
             msg.control = 2;
 
             priority = 0;
@@ -262,7 +271,7 @@ int main(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            if (mq_unlink(msg.user_name) == -1)
+            if (mq_unlink(msg.user_name) == -1) // Clean up after yourself
             {
                 perror("Client: mq_unlink");
                 exit(1);
@@ -270,7 +279,8 @@ int main(int argc, char **argv)
             
             exit(EXIT_SUCCESS);
 
-        case 'T':
+        case 'T': // Super duper Secret Option shhhhhh
+            /* Use this to print list of users server-side */
             msg.control = 3;
             dummy = getchar();
             printf("\nTesting Structure\n");
